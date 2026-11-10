@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Флеш-карточки (Anki-style)</title>
+<style>
+  :root{
+    --bg:#f1f5f9; --surface:#fff; --text:#0f172a; --muted:#64748b;
+    --accent:#4f46e5; --accent-2:#4338ca; --green:#059669; --red:#dc2626;
+    --border:#e2e8f0; --radius:16px; --shadow:0 10px 30px rgba(15,23,42,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;padding:16px;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .app{max-width:680px;margin:0 auto}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0}
+  .tabs{display:flex;gap:4px;background:#e2e8f0;padding:4px;border-radius:12px}
+  .tab{border:0;background:transparent;padding:8px 16px;border-radius:9px;font-size:14px;
+       font-weight:600;color:var(--muted);cursor:pointer}
+  .tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .view{display:none} .view.active{display:block}
+  .panel{background:var(--surface);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:16px}
+  .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:15px;line-height:1.5}
+  .progress{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:8px}
+  .scene{perspective:1400px;height:300px;margin:8px 0 16px}
+  .card3d{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.4,.2,.2,1);cursor:pointer}
+  .card3d.flipped{transform:rotateY(180deg)}
+  .face{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);backface-visibility:hidden;-webkit-backface-visibility:hidden;text-align:center;overflow:auto}
+  .face.back{transform:rotateY(180deg);background:#eef2ff;color:#3730a3}
+  .face .card-img{max-width:100%;max-height:120px;border-radius:8px;margin-bottom:12px;object-fit:contain}
+  .face .card-text{font-size:24px;font-weight:600;line-height:1.35;white-space:pre-wrap;word-break:break-word}
+  .face .speak-btn{margin-top:12px;border:0;background:#e2e8f0;border-radius:8px;padding:8px 12px;font-size:18px;cursor:pointer}
+  .controls{display:flex;gap:10px}
+  .btn{flex:1;border:0;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+  .btn:active{transform:scale(.98)}
+  .btn-primary{background:var(--accent);color:#fff} .btn-primary:hover{background:var(--accent-2)}
+  .btn-green{background:var(--green);color:#fff} .btn-red{background:var(--red);color:#fff}
+  .btn-ghost{background:#e2e8f0;color:var(--text)}
+  .btn-small{flex:none;padding:8px 12px;font-size:13px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px}
+  textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:12px;font-size:15px;font-family:inherit;resize:vertical;background:#f8fafc;color:var(--text)}
+  textarea:focus{outline:2px solid var(--accent);border-color:transparent;background:#fff}
+  .field{margin-bottom:12px}
+  .form-actions{display:flex;gap:10px}
+  .card-row{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;background:#f8fafc;margin-bottom:10px}
+  .card-row-content{flex:1;min-width:0}
+  .card-front-text{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .card-back-text{font-size:14px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .icon-btn{border:0;background:#e2e8f0;border-radius:8px;width:38px;height:38px;font-size:16px;cursor:pointer;flex-shrink:0}
+  .icon-btn:hover{background:#cbd5e1}
+  .results{text-align:center;padding:40px 20px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .results h2{margin:0 0 8px;font-size:20px}
+  .nums{font-size:15px;color:var(--muted);margin:0 0 20px}
+  .deck-bar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+  .deck-bar select{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);font-size:14px;font-family:inherit;color:var(--text)}
+  .img-preview{max-height:80px;border-radius:8px;margin-top:8px;display:none;object-fit:contain}
+  @media (max-width:480px){.face .card-text{font-size:20px}.scene{height:260px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <h1>🃏 Флеш-карточки</h1>
+    <div class="tabs">
+      <button class="tab active" id="studyTab" data-view="study">Учить</button>
+      <button class="tab" id="manageTab" data-view="manage">Карточки</button>
+    </div>
+  </div>
+
+  <!-- РЕЖИМ УЧЁБЫ -->
+  <section class="view active" id="studyView">
+    <div class="deck-bar">
+      <select id="deckSelect"></select>
+      <button class="btn btn-ghost btn-small" id="newDeckBtn" type="button">+ Колода</button>
+    </div>
+
+    <div id="studyEmpty" class="panel empty" style="display:none">
+      В этой колоде нет карточек.<br>Перейдите во вкладку «Карточки» и добавьте первые.
+    </div>
+
+    <div id="studyStart" class="panel empty" style="display:none">
+      <p style="margin:0 0 16px">Карточек к повторению: <b id="dueCount">0</b></p>
+      <button class="btn btn-primary" id="startBtn" style="max-width:240px;margin:0 auto">Учить</button>
+      <p style="margin:16px 0 0;font-size:13px">или <a href="#" id="studyAllLink">повторить все карточки</a></p>
+    </div>
+
+    <div id="studyResults" class="results" style="display:none">
+      <h2>Сессия завершена 🎉</h2>
+      <p class="nums">Повторено: <b id="resReviewed">0</b></p>
+      <button class="btn btn-primary" id="restartBtn" style="max-width:240px;margin:0 auto">Ещё раз</button>
+    </div>
+
+    <div id="studyMain" style="display:none">
+      <div class="progress">
+        <span id="progressLeft">Осталось: 0</span>
+        <span id="progressDue">В очереди</span>
+      </div>
+      <div class="scene">
+        <div class="card3d" id="card3d">
+          <div class="face front" id="cardFront"></div>
+          <div class="face back" id="cardBack"></div>
+        </div>
+      </div>
+      <div class="controls" id="flipControls">
+        <button class="btn btn-primary" id="flipBtn">Показать ответ</button>
+      </div>
+      <div class="controls" id="answerControls" style="display:none">
+        <button class="btn btn-red" id="unknownBtn">Не помню</button>
+        <button class="btn btn-green" id="knownBtn">Знаю</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- УПРАВЛЕНИЕ КАРТОЧКАМИ -->
+  <section class="view" id="manageView">
+    <div class="panel">
+      <div class="field">
+        <label for="deckSelectManage">Колода</label>
+        <div style="display:flex;gap:8px">
+          <select id="deckSelectManage" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);font-family:inherit"></select>
+          <button class="btn btn-ghost btn-small" id="renameDeckBtn" type="button">✏️</button>
+          <button class="btn btn-ghost btn-small" id="deleteDeckBtn" type="button">🗑️</button>
+        </div>
+      </div>
+      <form id="cardForm">
+        <div class="field">
+          <label for="frontInput">Сторона A — слово / вопрос</label>
+          <textarea id="frontInput" rows="2" placeholder="Например: apple" required></textarea>
+        </div>
+        <div class="field">
+          <label for="backInput">Сторона B — перевод / ответ</label>
+          <textarea id="backInput" rows="2" placeholder="Например: яблоко" required></textarea>
+        </div>
+        <div class="field">
+          <label for="imageInput">Картинка (необязательно)</label>
+          <input type="file" id="imageInput" accept="image/*">
+          <img id="imagePreview" class="img-preview" alt="Превью">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="saveBtn">Добавить</button>
+          <button type="button" class="btn btn-ghost" id="cancelBtn" style="display:none">Отмена</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+        <b>Карточек: <span id="count">0</span></b>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-small" id="exportBtn">Экспорт</button>
+          <button class="btn btn-ghost btn-small" id="importBtn">Импорт</button>
+          <input type="file" id="importFile" accept=".json" hidden>
+        </div>
+      </div>
+      <div id="cardsList"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const STORAGE_KEY = 'flashcards_v2';
+  const $ = (s) => document.querySelector(s);
+
+  // ---------- Модель данных ----------
+  // Состояние: { decks: [ { id, name, cards: [ {id, front, back, image, interval, repetition, efactor, dueAt} ] } ] }
+  let state = { decks: [] };
+  let currentDeckId = null;
+  let editingId = null;
+
+  // Состояние сессии
+  let sessionCards = [];
+  let currentCard = null;
+  let flipped = false;
+  let sessionReviewed = 0;
+
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  // ---------- Инициализация ----------
+  function initState() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.decks)) state = parsed;
+      } catch(e) { console.warn('Ошибка чтения localStorage', e); }
+    }
+    if (state.decks.length === 0) {
+      state.decks.push({ id: uid(), name: 'Моя колода', cards: [] });
+    }
+    if (!currentDeckId || !state.decks.find(d => d.id === currentDeckId)) {
+      currentDeckId = state.decks[0].id;
+    }
+  }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function getCurrentDeck() {
+    return state.decks.find(d => d.id === currentDeckId);
+  }
+
+  // ---------- SM-2 ----------
+  function reviewCard(card, grade) {
+    // grade: 0..5 (в нашем UI: 2 = Не помню, 5 = Знаю)
+    let { interval, repetition, efactor } = card;
+    if (grade >= 3) {
+      if (repetition === 0) interval = 1;
+      else if (repetition === 1) interval = 6;
+      else interval = Math.round(interval * efactor);
+      repetition += 1;
+    } else {
+      repetition = 0;
+      interval = 1;
+    }
+    efactor = Math.max(1.3, efactor + (0.1 - (5 - grade) * (0.08 + (5 - grade) * 0.02)));
+    const dueAt = Date.now() + interval * 24 * 60 * 60 * 1000;
+    return { ...card, interval, repetition, efactor, dueAt };
+  }
+
+  function makeNewCard(front, back, image) {
+    return {
+      id: uid(), front, back, image: image || null,
+      interval: 0, repetition: 0, efactor: 2.5, dueAt: Date.now()
+    };
+  }
+
+  // ---------- Озвучивание ----------
+  function speakText(text) {
+    if (!('speechSynthesis' in window)) { alert('Ваш браузер не поддерживает озвучивание.'); return; }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'en-US'; // Можно изменить на нужный язык
+    window.speechSynthesis.speak(utter);
+  }
+
+  // ---------- Работа с изображениями ----------
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+    });
+  }
+
+  // ---------- Вкладки ----------
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => showView(t.dataset.view));
+  });
+
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    $('#' + name + 'View').classList.add('active');
+    $('#' + name + 'Tab').classList.add('active');
+    if (name === 'study') renderStudy();
+    else renderManage();
+  }
+
+  // ---------- Колоды ----------
+  function renderDeckSelectors() {
+    const selStudy = $('#deckSelect');
+    const selManage = $('#deckSelectManage');
+    [selStudy, selManage].forEach(sel => {
+      sel.innerHTML = '';
+      state.decks.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = d.name;
+        if (d.id === currentDeckId) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  $('#deckSelect').addEventListener('change', (e) => {
+    currentDeckId = e.target.value;
+    sessionCards = []; currentCard = null; flipped = false;
+    renderDeckSelectors();
+    renderStudy();
+  });
+
+  $('#deckSelectManage').addEventListener('change', (e) => {
+    currentDeckId = e.target.value;
+    renderDeckSelectors();
+    renderManage();
+  });
+
+  $('#newDeckBtn').addEventListener('click', () => {
+    const name = prompt('Название новой колоды:');
+    if (!name || !name.trim()) return;
+    const deck = { id: uid(), name: name.trim(), cards: [] };
+    state.decks.push(deck);
+    currentDeckId = deck.id;
+    saveState();
+    renderDeckSelectors();
+    renderStudy();
+    renderManage();
+  });
+
+  $('#renameDeckBtn').addEventListener('click', () => {
+    const deck = getCurrentDeck();
+    if (!deck) return;
+    const name = prompt('Новое название колоды:', deck.name);
+    if (!name || !name.trim()) return;
+    deck.name = name.trim();
+    saveState();
+    renderDeckSelectors();
+    renderManage();
+  });
+
+  $('#deleteDeckBtn').addEventListener('click', () => {
+    if (state.decks.length <= 1) { alert('Нельзя удалить последнюю колоду.'); return; }
+    const deck = getCurrentDeck();
+    if (!confirm(`Удалить колоду «${deck.name}» и все её карточки?`)) return;
+    state.decks = state.decks.filter(d => d.id !== currentDeckId);
+    currentDeckId = state.decks[0].id;
+    saveState();
+    renderDeckSelectors();
+    renderStudy();
+    renderManage();
+  });
+
+  // ---------- Учёба ----------
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function getDueCards(deck) {
+    const now = Date.now();
+    return deck.cards.filter(c => (c.dueAt || 0) <= now).sort((a,b) => (a.dueAt||0) - (b.dueAt||0));
+  }
+
+  function renderStudy() {
+    const deck = getCurrentDeck();
+    const empty = $('#studyEmpty'), start = $('#studyStart'), main = $('#studyMain'), results = $('#studyResults');
+    [empty, start, main, results].forEach(el => el.style.display = 'none');
+
+    if (!deck || deck.cards.length === 0) { empty.style.display = 'block'; return; }
+    if (!currentCard) {
+      const due = getDueCards(deck);
+      if (due.length === 0) {
+        results.style.display = 'block';
+        $('#resReviewed').textContent = sessionReviewed;
+      } else {
+        start.style.display = 'block';
+        $('#dueCount').textContent = due.length;
+      }
+      return;
+    }
+
+    main.style.display = 'block';
+    $('#progressLeft').textContent = `Осталось: ${sessionCards.length}`;
+    $('#progressDue').textContent = `Повторено: ${sessionReviewed}`;
+
+    const frontEl = $('#cardFront'), backEl = $('#cardBack');
+    frontEl.innerHTML = ''; backEl.innerHTML = '';
+    if (currentCard.image) {
+      const img = document.createElement('img'); img.src = currentCard.image; img.className = 'card-img'; frontEl.appendChild(img);
+    }
+    const frontText = document.createElement('div'); frontText.className = 'card-text'; frontText.textContent = currentCard.front; frontEl.appendChild(frontText);
+    const speakBtnF = document.createElement('button'); speakBtnF.className = 'speak-btn'; speakBtnF.textContent = '🔊'; speakBtnF.onclick = (e) => { e.stopPropagation(); speakText(currentCard.front); }; frontEl.appendChild(speakBtnF);
+
+    if (currentCard.image) {
+      const img = document.createElement('img'); img.src = currentCard.image; img.className = 'card-img'; backEl.appendChild(img);
+    }
+    const backText = document.createElement('div'); backText.className = 'card-text'; backText.textContent = currentCard.back; backEl.appendChild(backText);
+    const speakBtnB = document.createElement('button'); speakBtnB.className = 'speak-btn'; speakBtnB.textContent = '🔊'; speakBtnB.onclick = (e) => { e.stopPropagation(); speakText(currentCard.back); }; backEl.appendChild(speakBtnB);
+
+    $('#card3d').classList.toggle('flipped', flipped);
+    $('#flipControls').style.display = flipped ? 'none' : 'flex';
+    $('#answerControls').style.display = flipped ? 'flex' : 'none';
+  }
+
+  function startStudySession(studyAll) {
+    const deck = getCurrentDeck();
+    if (!deck) return;
+    let cardsToStudy = studyAll ? deck.cards.slice() : getDueCards(deck);
+    if (cardsToStudy.length === 0) return;
+    sessionCards = shuffle(cardsToStudy);
+    sessionReviewed = 0;
+    flipped = false;
+    currentCard = sessionCards.shift() || null;
+    renderStudy();
+  }
+
+  function answer(known) {
+    if (!currentCard || !flipped) return;
+    const deck = getCurrentDeck();
+    const idx = deck.cards.findIndex(c => c.id === currentCard.id);
+    if (idx !== -1) {
+      const grade = known ? 5 : 2;
+      deck.cards[idx] = reviewCard(deck.cards[idx], grade);
+      saveState();
+    }
+    sessionReviewed++;
+    flipped = false;
+    currentCard = sessionCards.shift() || null;
+    renderStudy();
+  }
+
+  $('#card3d').addEventListener('click', () => { if (!currentCard) return; flipped = !flipped; renderStudy(); });
+  $('#flipBtn').addEventListener('click', () => { if (!currentCard) return; flipped = !flipped; renderStudy(); });
+  $('#knownBtn').addEventListener('click', () => answer(true));
+  $('#unknownBtn').addEventListener('click', () => answer(false));
+  $('#startBtn').addEventListener('click', () => startStudySession(false));
+  $('#studyAllLink').addEventListener('click', (e) => { e.preventDefault(); startStudySession(true); });
+  $('#restartBtn').addEventListener('click', () => { currentCard = null; renderStudy(); });
+
+  // ---------- Управление карточками ----------
+  function renderManage() {
+    renderDeckSelectors();
+    const deck = getCurrentDeck();
+    const list = $('#cardsList');
+    list.innerHTML = '';
+    $('#count').textContent = deck ? deck.cards.length : 0;
+
+    if (!deck || deck.cards.length === 0) {
+      list.innerHTML = '<div class="empty">Пока нет карточек. Добавьте первую выше 👆</div>';
+      return;
+    }
+
+    deck.cards.forEach(c => {
+      const row = document.createElement('div'); row.className = 'card-row';
+      const content = document.createElement('div'); content.className = 'card-row-content';
+      const f = document.createElement('div'); f.className = 'card-front-text'; f.textContent = c.front;
+      const b = document.createElement('div'); b.className = 'card-back-text'; b.textContent = c.back;
+      content.append(f, b);
+
+      const actions = document.createElement('div'); actions.style.display = 'flex'; actions.style.gap = '8px';
+
+      const editBtn = document.createElement('button'); editBtn.className = 'icon-btn'; editBtn.textContent = '✏️'; editBtn.title = 'Изменить';
+      editBtn.onclick = () => startEdit(c);
+
+      const delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.textContent = '🗑️'; delBtn.title = 'Удалить';
+      delBtn.onclick = () => deleteCard(c.id);
+
+      actions.append(editBtn, delBtn);
+      row.append(content, actions);
+      list.appendChild(row);
+    });
+  }
+
+  $('#cardForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const deck = getCurrentDeck();
+    if (!deck) return;
+
+    const front = $('#frontInput').value.trim();
+    const back = $('#backInput').value.trim();
+    if (!front || !back) return;
+
+    let image = null;
+    const fileInput = $('#imageInput');
+    if (fileInput.files && fileInput.files[0]) {
+      try { image = await fileToBase64(fileInput.files[0]); }
+      catch(err) { alert('Не удалось загрузить изображение.'); return; }
+    }
+
+    if (editingId) {
+      const card = deck.cards.find(c => c.id === editingId);
+      if (card) {
+        card.front = front; card.back = back;
+        if (image !== null) card.image = image;
+      }
+    } else {
+      deck.cards.push(makeNewCard(front, back, image));
+    }
+
+    saveState();
+    resetForm();
+    renderManage();
+  });
+
+  function resetForm() {
+    $('#frontInput').value = '';
+    $('#backInput').value = '';
+    $('#imageInput').value = '';
+    $('#imagePreview').style.display = 'none';
+    $('#imagePreview').src = '';
+    editingId = null;
+    $('#saveBtn').textContent = 'Добавить';
+    $('#cancelBtn').style.display = 'none';
+  }
+
+  function startEdit(c) {
+    editingId = c.id;
+    $('#frontInput').value = c.front;
+    $('#backInput').value = c.back;
+    if (c.image) {
+      $('#imagePreview').src = c.image;
+      $('#imagePreview').style.display = 'block';
+    } else {
+      $('#imagePreview').style.display = 'none';
+    }
+    $('#saveBtn').textContent = 'Сохранить';
+    $('#cancelBtn').style.display = 'block';
+    $('#frontInput').focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  $('#cancelBtn').addEventListener('click', resetForm);
+
+  function deleteCard(id) {
+    if (!confirm('Удалить эту карточку?')) return;
+    const deck = getCurrentDeck();
+    deck.cards = deck.cards.filter(c => c.id !== id);
+    saveState();
+    renderManage();
+  }
+
+  $('#imageInput').addEventListener('change', () => {
+    const file = $('#imageInput').files[0];
+    if (!file) { $('#imagePreview').style.display = 'none'; return; }
+    const reader = new FileReader();
+    reader.onload = () => { $('#imagePreview').src = reader.result; $('#imagePreview').style.display = 'block'; };
+    reader.readAsDataURL(file);
+  });
+
+  // ---------- Экспорт / импорт ----------
+  $('#exportBtn').addEventListener('click', () => {
+    const deck = getCurrentDeck();
+    if (!deck || deck.cards.length === 0) return alert('Нет карточек для экспорта.');
+    const blob = new Blob([JSON.stringify(deck.cards, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `deck-${deck.name}.json`; a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  $('#importBtn').addEventListener('click', () => $('#importFile').click());
+  $('#importFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data)) throw new Error();
+        const valid = data.filter(x => x && typeof x.front === 'string' && typeof x.back === 'string')
+          .map(x => makeNewCard(x.front, x.back, x.image || null));
+        if (valid.length === 0) throw new Error();
+        if (!confirm(`Импортировать ${valid.length} карточек в текущую колоду?`)) return;
+        const deck = getCurrentDeck();
+        deck.cards = deck.cards.concat(valid);
+        saveState();
+        renderManage();
+        renderStudy();
+      } catch (err) {
+        alert('Не удалось прочитать файл. Нужен JSON-массив с полями front и back.');
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------- Клавиатура ----------
+  document.addEventListener('keydown', (e) => {
+    if (!$('#studyView').classList.contains('active') || !currentCard) return;
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (!flipped) { flipped = true; renderStudy(); } }
+    else if (flipped && (e.key === '1' || e.key === 'ArrowLeft')) answer(false);
+    else if (flipped && (e.key === '2' || e.key === 'ArrowRight')) answer(true);
+  });
+
+  // ---------- Старт ----------
+  initState();
+  renderDeckSelectors();
+  renderStudy();
+  renderManage();
+</script>
+</body>
+</html>
